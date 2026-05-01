@@ -2,7 +2,6 @@ import faiss
 import numpy as np
 import pickle
 import os
-from sentence_transformers import SentenceTransformer
 
 class VectorStore:
     def __init__(self, storage_dir="data/vector_store"):
