@@ -79,6 +79,8 @@ if prompt := st.chat_input("Ask about your documents..."):
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             relevant_chunks = vector_store.search(prompt, k=5)
-            answer = llm_service.generate_answer(prompt, relevant_chunks)
+            sys_meta = f"The user has {len(vector_store.synced_files)} documents synced from Google Drive, broken down into {len(vector_store.chunks)} knowledge chunks."
+            answer = llm_service.generate_answer(prompt, relevant_chunks, system_metadata=sys_meta)
             st.markdown(answer)
             st.session_state.messages.append({"role": "assistant", "content": answer})
+
