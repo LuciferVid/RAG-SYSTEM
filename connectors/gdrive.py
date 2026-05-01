@@ -17,13 +17,23 @@ class GDriveConnector:
 
     def _authenticate(self, credentials_path):
         import streamlit as st
+        import json
+        import os
         
-        # 1. Try Streamlit Secrets (for Cloud Hosting)
+        # 1. Try Environment Variable (For Render / Cloud)
+        if "GCP_SERVICE_ACCOUNT_JSON" in os.environ:
+            try:
+                creds_info = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
+                return service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+            except Exception as e:
+                print(f"Failed to parse GCP_SERVICE_ACCOUNT_JSON: {e}")
+
+        # 2. Try Streamlit Secrets (for Streamlit Cloud)
         if "gdrive_service_account" in st.secrets:
             creds_info = dict(st.secrets["gdrive_service_account"])
             return service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
 
-        # 2. Try Service Account File
+        # 3. Try Service Account File
         if os.path.exists(credentials_path):
             return service_account.Credentials.from_service_account_file(credentials_path, scopes=SCOPES)
 

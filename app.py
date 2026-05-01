@@ -15,72 +15,21 @@ load_dotenv()
 
 st.set_page_config(page_title="GDrive AI Assistant", page_icon="🧠", layout="wide")
 
-# Session State for Credentials
-if "auth_ready" not in st.session_state:
-    st.session_state.auth_ready = False
+# Initialize Services (Cached to avoid re-loading models)
+@st.cache_resource
+def get_services():
+    connector = GDriveConnector()
+    vector_store = VectorStore()
+    llm_service = LLMService()
+    parser = DocumentParser()
+    chunker = DocumentChunker()
+    return connector, vector_store, llm_service, parser, chunker
 
-# --- SETUP SCREEN ---
-if not st.session_state.auth_ready:
-    st.title("🔐 GDrive RAG Setup")
-    st.info("To protect your credentials, please provide them for this session. They are not stored permanently.")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Auto-fill from env if available
-        default_key = os.getenv("GEMINI_API_KEY", "")
-        gemini_key = st.text_input("Enter Gemini API Key", value=default_key, type="password")
-        st.markdown("[Get a key here](https://aistudio.google.com/app/apikey)")
-        
-    with col2:
-        uploaded_file = st.file_uploader("Upload service_account.json", type="json")
-        local_creds_path = "data/credentials/service_account.json"
-        has_local_creds = os.path.exists(local_creds_path)
-        if has_local_creds:
-            st.success("✅ Local service_account.json found!")
-    
-    if st.button("🚀 Initialize System"):
-        # Check if we use uploaded or local
-        final_creds_ready = False
-        if uploaded_file:
-            os.makedirs("data/credentials", exist_ok=True)
-            with open(local_creds_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            final_creds_ready = True
-        elif has_local_creds:
-            final_creds_ready = True
-            
-        if gemini_key and final_creds_ready:
-            try:
-                # 1. Set Gemini Key
-                os.environ["GEMINI_API_KEY"] = gemini_key
-                
-                # 2. Save service account temporarily
-                os.makedirs("data/credentials", exist_ok=True)
-                with open("data/credentials/service_account.json", "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                
-                # 3. Test initialization
-                with st.spinner("Loading models..."):
-                    st.session_state.connector = GDriveConnector()
-                    st.session_state.vector_store = VectorStore()
-                    st.session_state.llm_service = LLMService()
-                    st.session_state.parser = DocumentParser()
-                    st.session_state.chunker = DocumentChunker()
-                    st.session_state.auth_ready = True
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Initialization Failed: {e}")
-        else:
-            st.warning("Please provide both the API Key and the JSON file.")
+try:
+    connector, vector_store, llm_service, parser, chunker = get_services()
+except Exception as e:
+    st.error(f"Failed to initialize services. Ensure credentials are set correctly in the environment. Error: {e}")
     st.stop()
-
-# --- MAIN APP SCREEN ---
-connector = st.session_state.connector
-vector_store = st.session_state.vector_store
-llm_service = st.session_state.llm_service
-parser = st.session_state.parser
-chunker = st.session_state.chunker
 
 # Sidebar
 with st.sidebar:
