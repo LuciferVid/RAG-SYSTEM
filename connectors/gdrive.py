@@ -29,9 +29,12 @@ class GDriveConnector:
                 print(f"Failed to parse GCP_SERVICE_ACCOUNT_JSON: {e}")
 
         # 2. Try Streamlit Secrets (for Streamlit Cloud)
-        if "gdrive_service_account" in st.secrets:
-            creds_info = dict(st.secrets["gdrive_service_account"])
-            return service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+        try:
+            if "gdrive_service_account" in st.secrets:
+                creds_info = dict(st.secrets["gdrive_service_account"])
+                return service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+        except Exception:
+            pass
 
         # 3. Try Service Account File
         if os.path.exists(credentials_path):
