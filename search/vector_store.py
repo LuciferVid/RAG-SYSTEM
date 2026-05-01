@@ -2,19 +2,18 @@ import faiss
 import numpy as np
 import pickle
 import os
+from sentence_transformers import SentenceTransformer
 
 class VectorStore:
-    def __init__(self, 
-                 index_path='data/vector_store/index.faiss', 
-                 chunks_path='data/vector_store/chunks.pkl',
-                 synced_files_path='data/vector_store/synced_files.pkl'):
-        self.index_path = index_path
-        self.chunks_path = chunks_path
-        self.synced_files_path = synced_files_path
+    def __init__(self, storage_dir="data/vector_store"):
+        self.storage_dir = storage_dir
+        self.index_path = os.path.join(storage_dir, "index.faiss")
+        self.chunks_path = os.path.join(storage_dir, "chunks.pkl")
+        self.synced_files_path = os.path.join(storage_dir, "synced_files.pkl")
         self.dimension = 384  # Dimension for all-MiniLM-L6-v2
         
         # Ensure directory exists
-        os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
+        os.makedirs(self.storage_dir, exist_ok=True)
         
         self.index = self._load_index()
         self.chunks = self._load_chunks()
@@ -22,7 +21,10 @@ class VectorStore:
 
     def _load_index(self):
         if os.path.exists(self.index_path):
-            return faiss.read_index(self.index_path)
+            try:
+                return faiss.read_index(self.index_path)
+            except Exception:
+                pass
         return faiss.IndexFlatL2(self.dimension)
 
     def _load_chunks(self):
