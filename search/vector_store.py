@@ -85,9 +85,14 @@ class VectorStore:
             
         self.save()
 
-    def is_file_synced(self, file_id, modified_time):
-        """Checks if a file is already synced and not modified."""
-        return self.synced_files.get(file_id) == modified_time
+    def should_sync(self, file_id, modified_time):
+        """Checks if a file needs to be synced (not synced or modified)."""
+        return self.synced_files.get(file_id) != modified_time
+
+    def mark_synced(self, file_id, modified_time):
+        """Marks a file as successfully synced."""
+        self.synced_files[file_id] = modified_time
+        self.save()
 
     def search(self, query, k=5):
         """Searches for top k relevant chunks using a text query."""
