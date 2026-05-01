@@ -13,52 +13,68 @@ from api.llm_service import LLMService
 
 load_dotenv()
 
-# Streamlit Configuration
 st.set_page_config(page_title="GDrive AI Assistant", page_icon="🧠", layout="wide")
 
-# Check for required Secrets
-def check_secrets():
-    missing = []
-    if "GEMINI_API_KEY" not in st.secrets and not os.getenv("GEMINI_API_KEY"):
-        missing.append("GEMINI_API_KEY")
-    if "gdrive_service_account" not in st.secrets:
-        missing.append("gdrive_service_account (JSON content)")
-    return missing
+# Session State for Credentials
+if "auth_ready" not in st.session_state:
+    st.session_state.auth_ready = False
 
-missing_secrets = check_secrets()
-if missing_secrets:
-    st.error(f"❌ Missing Secrets in Streamlit Cloud: {', '.join(missing_secrets)}")
-    st.info("Please add these to your Streamlit App settings > Secrets.")
+# --- SETUP SCREEN ---
+if not st.session_state.auth_ready:
+    st.title("🔐 GDrive RAG Setup")
+    st.info("To protect your credentials, please provide them for this session. They are not stored permanently.")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        gemini_key = st.text_input("Enter Gemini API Key", type="password")
+        st.markdown("[Get a key here](https://aistudio.google.com/app/apikey)")
+        
+    with col2:
+        uploaded_file = st.file_uploader("Upload service_account.json", type="json")
+    
+    if st.button("🚀 Initialize System"):
+        if gemini_key and uploaded_file:
+            try:
+                # 1. Set Gemini Key
+                os.environ["GEMINI_API_KEY"] = gemini_key
+                
+                # 2. Save service account temporarily
+                os.makedirs("data/credentials", exist_ok=True)
+                with open("data/credentials/service_account.json", "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                # 3. Test initialization
+                with st.spinner("Loading models..."):
+                    st.session_state.connector = GDriveConnector()
+                    st.session_state.vector_store = VectorStore()
+                    st.session_state.llm_service = LLMService()
+                    st.session_state.parser = DocumentParser()
+                    st.session_state.chunker = DocumentChunker()
+                    st.session_state.auth_ready = True
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Initialization Failed: {e}")
+        else:
+            st.warning("Please provide both the API Key and the JSON file.")
     st.stop()
 
-# Initialize Services (Cached to avoid re-loading models)
-@st.cache_resource
-def get_services():
-    # Force the API key from secrets into the environment for LLMService
-    if "GEMINI_API_KEY" in st.secrets:
-        os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
-    
-    connector = GDriveConnector()
-    vector_store = VectorStore()
-    llm_service = LLMService()
-    parser = DocumentParser()
-    chunker = DocumentChunker()
-    return connector, vector_store, llm_service, parser, chunker
+# --- MAIN APP SCREEN ---
+connector = st.session_state.connector
+vector_store = st.session_state.vector_store
+llm_service = st.session_state.llm_service
+parser = st.session_state.parser
+chunker = st.session_state.chunker
 
-connector, vector_store, llm_service, parser, chunker = get_services()
-
-# Sidebar for Sync
+# Sidebar
 with st.sidebar:
     st.title("🧠 Drive Settings")
     if st.button("🔄 Sync with Google Drive"):
         with st.status("Syncing Documents...", expanded=True) as status:
             try:
-                st.write("Fetching file list...")
                 files = connector.list_files()
-                
                 new_files_indexed = 0
                 for file in files:
-                    # Check if file needs syncing
                     if vector_store.should_sync(file['id'], file['modifiedTime']):
                         st.write(f"📥 Processing: {file['name']}")
                         content = connector.download_file(file['id'], file['mimeType'])
@@ -71,18 +87,18 @@ with st.sidebar:
                         vector_store.add_chunks(chunks)
                         vector_store.mark_synced(file['id'], file['modifiedTime'])
                         new_files_indexed += 1
-                
-                status.update(label=f"✅ Sync Complete! ({new_files_indexed} files updated)", state="complete")
+                status.update(label=f"✅ Sync Complete! ({new_files_indexed} new files)", state="complete")
             except Exception as e:
-                st.error(f"Sync failed: {str(e)}")
+                st.error(f"Sync failed: {e}")
     
     st.markdown("---")
-    st.metric("Total Knowledge Chunks", len(vector_store.chunks))
-    st.metric("Files in Index", len(vector_store.synced_files))
+    st.metric("Knowledge Chunks", len(vector_store.chunks))
+    if st.button("🗑️ Clear Credentials"):
+        st.session_state.auth_ready = False
+        st.rerun()
 
-# Main Chat Interface
+# Chat UI
 st.title("Drive Intelligence Assistant")
-st.caption("Grounded GDrive RAG • Powered by Gemini 1.5 Flash")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -96,13 +112,8 @@ if prompt := st.chat_input("Ask about your documents..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("assistant"):
-        with st.spinner("Searching knowledge base..."):
-            # 1. Retrieval
+        with st.spinner("Thinking..."):
             relevant_chunks = vector_store.search(prompt, k=5)
-            
-            # 2. Generation
             answer = llm_service.generate_answer(prompt, relevant_chunks)
-            
-            # 3. UI Response
             st.markdown(answer)
             st.session_state.messages.append({"role": "assistant", "content": answer})
