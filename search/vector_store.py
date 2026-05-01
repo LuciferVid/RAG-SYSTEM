@@ -10,7 +10,7 @@ class VectorStore:
         self.index_path = os.path.join(storage_dir, "index.faiss")
         self.chunks_path = os.path.join(storage_dir, "chunks.pkl")
         self.synced_files_path = os.path.join(storage_dir, "synced_files.pkl")
-        self.dimension = 384  # Dimension for all-MiniLM-L6-v2
+        self.dimension = 768  # Dimension for Gemini text-embedding-004
         
         # Ensure directory exists
         os.makedirs(self.storage_dir, exist_ok=True)
@@ -39,6 +39,42 @@ class VectorStore:
                 return pickle.load(f)
         return {}
 
+    def add_chunks(self, new_chunks):
+        if not new_chunks:
+            return
+            
+        import google.generativeai as genai
+        
+        texts = [chunk['text'] for chunk in new_chunks]
+        
+        # Batch requests to Gemini API (Limit to 100 per request usually, but let's do 50 for safety)
+        batch_size = 50
+        all_embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i+batch_size]
+            try:
+                response = genai.embed_content(
+                    model="models/text-embedding-004",
+                    content=batch_texts,
+                    task_type="retrieval_document"
+                )
+                if 'embedding' in response:
+                    all_embeddings.extend(response['embedding'])
+            except Exception as e:
+                print(f"Embedding error: {e}")
+                # Fallback zero vectors if error occurs
+                all_embeddings.extend([[0.0] * self.dimension] * len(batch_texts))
+                
+        if not all_embeddings:
+            return
+            
+        embeddings = np.array(all_embeddings).astype('float32')
+        
+        self.index.add(embeddings)
+        self.chunks.extend(new_chunks)
+        
+        self.save()
+
     def add_documents(self, embeddings, chunks, file_id=None, modified_time=None):
         """Adds embeddings and corresponding chunks to the store."""
         if len(embeddings) > 0:
@@ -54,9 +90,23 @@ class VectorStore:
         """Checks if a file is already synced and not modified."""
         return self.synced_files.get(file_id) == modified_time
 
-    def search(self, query_embedding, k=5):
-        """Searches for top k relevant chunks."""
+    def search(self, query, k=5):
+        """Searches for top k relevant chunks using a text query."""
         if self.index.ntotal == 0:
+            return []
+            
+        import google.generativeai as genai
+        try:
+            response = genai.embed_content(
+                model="models/text-embedding-004",
+                content=query,
+                task_type="retrieval_query"
+            )
+            query_embedding = response.get('embedding')
+            if not query_embedding:
+                return []
+        except Exception as e:
+            print(f"Query embedding error: {e}")
             return []
             
         distances, indices = self.index.search(np.array([query_embedding]).astype('float32'), k)

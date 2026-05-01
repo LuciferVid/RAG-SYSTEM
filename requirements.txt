@@ -6,7 +6,6 @@ google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
 google-generativeai
-sentence-transformers
-faiss-cpu
 pypdf
+faiss-cpu
 requests
