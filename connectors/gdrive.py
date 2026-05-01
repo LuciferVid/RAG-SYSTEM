@@ -16,7 +16,14 @@ class GDriveConnector:
         self.service = build('drive', 'v3', credentials=self.creds)
 
     def _authenticate(self, credentials_path):
-        # 1. Try Service Account
+        import streamlit as st
+        
+        # 1. Try Streamlit Secrets (for Cloud Hosting)
+        if "gdrive_service_account" in st.secrets:
+            creds_info = dict(st.secrets["gdrive_service_account"])
+            return service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+
+        # 2. Try Service Account File
         if os.path.exists(credentials_path):
             return service_account.Credentials.from_service_account_file(credentials_path, scopes=SCOPES)
 
