@@ -27,14 +27,30 @@ if not st.session_state.auth_ready:
     col1, col2 = st.columns(2)
     
     with col1:
-        gemini_key = st.text_input("Enter Gemini API Key", type="password")
+        # Auto-fill from env if available
+        default_key = os.getenv("GEMINI_API_KEY", "")
+        gemini_key = st.text_input("Enter Gemini API Key", value=default_key, type="password")
         st.markdown("[Get a key here](https://aistudio.google.com/app/apikey)")
         
     with col2:
         uploaded_file = st.file_uploader("Upload service_account.json", type="json")
+        local_creds_path = "data/credentials/service_account.json"
+        has_local_creds = os.path.exists(local_creds_path)
+        if has_local_creds:
+            st.success("✅ Local service_account.json found!")
     
     if st.button("🚀 Initialize System"):
-        if gemini_key and uploaded_file:
+        # Check if we use uploaded or local
+        final_creds_ready = False
+        if uploaded_file:
+            os.makedirs("data/credentials", exist_ok=True)
+            with open(local_creds_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            final_creds_ready = True
+        elif has_local_creds:
+            final_creds_ready = True
+            
+        if gemini_key and final_creds_ready:
             try:
                 # 1. Set Gemini Key
                 os.environ["GEMINI_API_KEY"] = gemini_key
