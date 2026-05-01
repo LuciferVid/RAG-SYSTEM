@@ -1,101 +1,108 @@
 import streamlit as st
-import requests
 import os
+import io
+import json
 from dotenv import load_dotenv
+
+# Core Logic imports
+from connectors.gdrive import GDriveConnector
+from processing.parser import DocumentParser
+from processing.chunker import DocumentChunker
+from search.vector_store import VectorStore
+from api.llm_service import LLMService
 
 load_dotenv()
 
-# Prioritize the Cloud API URL (e.g., from ngrok), then local
-API_URL = st.secrets.get("API_URL") or os.getenv("API_URL", "http://localhost:8002")
+# Streamlit Configuration
+st.set_page_config(page_title="GDrive AI Assistant", page_icon="🧠", layout="wide")
 
-st.set_page_config(
-    page_title="GDrive Intelligence RAG",
-    page_icon="🧠",
-    layout="wide"
-)
+# Check for required Secrets
+def check_secrets():
+    missing = []
+    if "GEMINI_API_KEY" not in st.secrets and not os.getenv("GEMINI_API_KEY"):
+        missing.append("GEMINI_API_KEY")
+    if "gdrive_service_account" not in st.secrets:
+        missing.append("gdrive_service_account (JSON content)")
+    return missing
 
-# Custom CSS for UI
-st.markdown("""
-    <style>
-    .source-tag {
-        background-color: #1e2129;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 0.8em;
-        margin-right: 5px;
-        border: 1px solid #3d444d;
-    }
-    </style>
-""", unsafe_allow_html=True)
+missing_secrets = check_secrets()
+if missing_secrets:
+    st.error(f"❌ Missing Secrets in Streamlit Cloud: {', '.join(missing_secrets)}")
+    st.info("Please add these to your Streamlit App settings > Secrets.")
+    st.stop()
 
-# Sidebar
+# Initialize Services (Cached to avoid re-loading models)
+@st.cache_resource
+def get_services():
+    # Force the API key from secrets into the environment for LLMService
+    if "GEMINI_API_KEY" in st.secrets:
+        os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+    
+    connector = GDriveConnector()
+    vector_store = VectorStore()
+    llm_service = LLMService()
+    parser = DocumentParser()
+    chunker = DocumentChunker()
+    return connector, vector_store, llm_service, parser, chunker
+
+connector, vector_store, llm_service, parser, chunker = get_services()
+
+# Sidebar for Sync
 with st.sidebar:
-    st.title("🧠 GDrive RAG")
-    st.info(f"Connected to: {API_URL}")
-    st.markdown("---")
-    
-    st.subheader("System Control")
-    if st.button("🔄 Sync Google Drive"):
-        with st.spinner("Requesting sync from backend..."):
+    st.title("🧠 Drive Settings")
+    if st.button("🔄 Sync with Google Drive"):
+        with st.status("Syncing Documents...", expanded=True) as status:
             try:
-                response = requests.post(f"{API_URL}/sync-drive")
-                if response.status_code == 200:
-                    st.success("Sync started!")
-                else:
-                    st.error("Failed to trigger sync.")
+                st.write("Fetching file list...")
+                files = connector.list_files()
+                
+                new_files_indexed = 0
+                for file in files:
+                    # Check if file needs syncing
+                    if vector_store.should_sync(file['id'], file['modifiedTime']):
+                        st.write(f"📥 Processing: {file['name']}")
+                        content = connector.download_file(file['id'], file['mimeType'])
+                        text = parser.parse(content, file['mimeType'])
+                        chunks = chunker.chunk(text, metadata={
+                            "doc_id": file['id'],
+                            "file_name": file['name'],
+                            "source": "gdrive"
+                        })
+                        vector_store.add_chunks(chunks)
+                        vector_store.mark_synced(file['id'], file['modifiedTime'])
+                        new_files_indexed += 1
+                
+                status.update(label=f"✅ Sync Complete! ({new_files_indexed} files updated)", state="complete")
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Sync failed: {str(e)}")
     
     st.markdown("---")
-    st.subheader("Knowledge Base")
-    try:
-        status = requests.get(f"{API_URL}/status").json()
-        st.metric("Indexed Chunks", status.get("indexed_chunks", 0))
-        st.metric("Synced Files", status.get("synced_files_count", 0))
-    except:
-        st.warning("Could not reach backend. Is ngrok running?")
+    st.metric("Total Knowledge Chunks", len(vector_store.chunks))
+    st.metric("Files in Index", len(vector_store.synced_files))
 
-# Main Interface
+# Main Chat Interface
 st.title("Drive Intelligence Assistant")
-st.markdown("Ask anything about your shared Google Drive documents.")
+st.caption("Grounded GDrive RAG • Powered by Gemini 1.5 Flash")
 
-# Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-        if "sources" in message and message["sources"]:
-            st.markdown("---")
-            for source in message["sources"]:
-                st.markdown(f'<span class="source-tag">📄 {source}</span>', unsafe_allow_html=True)
 
-# User Input
-if prompt := st.chat_input("What would you like to know?"):
+if prompt := st.chat_input("Ask about your documents..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("assistant"):
-        with st.spinner("Consulting knowledge base..."):
-            try:
-                response = requests.post(f"{API_URL}/ask", json={"query": prompt})
-                if response.status_code == 200:
-                    data = response.json()
-                    st.markdown(data["answer"])
-                    
-                    if data.get("sources"):
-                        st.markdown("---")
-                        for source in data["sources"]:
-                            st.markdown(f'<span class="source-tag">📄 {source}</span>', unsafe_allow_html=True)
-                    
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": data["answer"],
-                        "sources": data.get("sources")
-                    })
-                else:
-                    st.error("Backend returned an error.")
-            except Exception as e:
-                st.error(f"Connection failed: {e}")
+        with st.spinner("Searching knowledge base..."):
+            # 1. Retrieval
+            relevant_chunks = vector_store.search(prompt, k=5)
+            
+            # 2. Generation
+            answer = llm_service.generate_answer(prompt, relevant_chunks)
+            
+            # 3. UI Response
+            st.markdown(answer)
+            st.session_state.messages.append({"role": "assistant", "content": answer})
