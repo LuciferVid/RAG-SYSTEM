@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: gdrive-rag-assistant
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      - key: GEMINI_API_KEY
+        sync: false # Set this in Render Dashboard
+    # Render's free tier has 512MB RAM. 
+    # all-MiniLM-L6-v2 should fit, but we'll use a small plan.
+    plan: free
