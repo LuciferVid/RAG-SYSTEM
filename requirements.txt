@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+sentence-transformers
+faiss-cpu
+pypdf
+google-generativeai
+python-dotenv
+pydantic
+numpy

@@ -1,0 +1,9 @@
+.env
+data/credentials/
+data/vector_store/
+__pycache__/
+*.pkl
+*.faiss
+.DS_Store
+venv/
+node_modules/
